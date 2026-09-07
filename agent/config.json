@@ -1,15 +1,30 @@
 {
   "agent": {
     "name": "Local AI Coding Agent",
-    "version": "3.1.0",
+    "version": "3.2.0",
     "models": {
       "primary": "gpt-oss:20b",
       "fallback": "qwen2.5-coder:latest",
       "fast": "deepseek-coder:1.3b"
     },
-    "ollama": {
-      "url": "http://localhost:11434",
-      "models_dir": "./models"
+    "providers": {
+      "ollama": {
+        "url": "http://localhost:11434",
+        "api_key": null,
+        "models_dir": "./models"
+      },
+      "openai": {
+        "url": "https://api.openai.com/v1",
+        "api_key": null
+      },
+      "anthropic": {
+        "url": "https://api.anthropic.com",
+        "api_key": null
+      },
+      "google": {
+        "url": "https://generativelanguage.googleapis.com/v1beta",
+        "api_key": null
+      }
     },
     "workspace": "./workspace",
     "logs": "./logs",
