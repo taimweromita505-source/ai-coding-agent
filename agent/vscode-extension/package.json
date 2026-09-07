@@ -1,0 +1,57 @@
+{
+  "name": "ai-coding-agent",
+  "displayName": "AI Coding Agent",
+  "description": "Unlimited AI Coding Agent - No Restrictions",
+  "version": "3.0.0",
+  "publisher": "ai-coding-agent",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Snippets",
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:aiAgent.start",
+    "onView:aiAgent.sidebar"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiAgent.start",
+        "title": "Start AI Agent"
+      },
+      {
+        "command": "aiAgent.chat",
+        "title": "AI Agent Chat"
+      },
+      {
+        "command": "aiAgent.explain",
+        "title": "Explain Code"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aiAgent.sidebar",
+          "title": "AI Agent",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "aiAgent.sidebar": [
+        {
+          "id": "aiAgent.chatView",
+          "name": "Chat"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "python -m tsc -p ./",
+    "compile": "python -m tsc -watch -p ./"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "agent": {
+    "name": "Local AI Coding Agent",
+    "version": "3.1.0",
+    "models": {
+      "primary": "gpt-oss:20b",
+      "fallback": "qwen2.5-coder:latest",
+      "fast": "deepseek-coder:1.3b"
+    },
+    "ollama": {
+      "url": "http://localhost:11434",
+      "models_dir": "./models"
+    },
+    "workspace": "./workspace",
+    "logs": "./logs",
+    "max_iterations": 10,
+    "temperature": 0.7,
+    "memory": {
+      "enabled": true,
+      "max_history": 1000,
+      "context_window": 4000,
+      "auto_learn": true,
+      "persist": true,
+      "learning_rate": 0.1
+    }
+  }
+}

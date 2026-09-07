@@ -1,0 +1,5 @@
+vscode-extension/**
+.gitignore
+*.log
+node_modules
+out/test/**
