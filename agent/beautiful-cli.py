@@ -71,19 +71,20 @@ class BeautifulCLI:
     def banner(self):
         print(f"""
 {Colors.CYAN}{Colors.BOLD}
-================================================================================
-                                                                                
-   ###   ###  #####  #   #  #####  #   #  #####  #   #  #   #  ###   ###     
-   #  # #   # #   # ## ## #   #  ## ## #   #  ##  # #   # #   # #  # #   #    
-   #  # #     #   # # # # #   #  # # # #   #  # # # #   # #   # #  # #       
-   ###  #     #####  #  #  #####  #  #  #####  #  ## #   # ##### ###   ###     
-   # #  #     #   #     # #   #     #  #   # #   ## #   #     # # #       #    
-   #  #  ###  #   #     # #   #     #  #   # #    #  ###      # #  #  ###      
-                                                                                
-               {Colors.BLUE}TAIMWE{Colors.CYAN}                       
-               {Colors.GREEN}AI Agent Ready{Colors.CYAN}
-================================================================================
-{Colors.END}""")
+ ================================================================================
+                                                                                 
+    ###   ###  #####  #   #  #####  #   #  #####  #   #  #   #  ###   ###     
+    #  # #   # #   # ## ## #   #  ## ## #   #  ##  # #   # #   # #  # #   #    
+    #  # #     #   # # # # #   #  # # # #   #  # # # #   # #   # #  # #       
+    ###  #     #####  #  #  #####  #  #  #####  #  ## #   # ##### ###   ###     
+    # #  #     #   #     # #   #     #  #   # #   ## #   #     # # #       #    
+    #  #  ###  #   #     # #   #     #  #   # #    #  ###      # #  #  ###      
+                                                                                 
+                {Colors.BLUE}TAIMWE{Colors.CYAN}                       
+                {Colors.GREEN}AI Agent Ready{Colors.CYAN}
+                {Colors.YELLOW}Developed by Taimwe.Romita{Colors.CYAN}
+ ================================================================================
+ {Colors.END}""")
     
     def status_bar(self):
         ollama_color = Colors.GREEN if self.ollama_status == "online" else Colors.RED if self.ollama_status == "offline" else Colors.YELLOW

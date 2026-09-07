@@ -299,6 +299,7 @@ Be fast and swift. Answer immediately without unnecessary explanation."""
     def interactive(self):
         print("=" * 60)
         print("  UNLIMITED AI CODING AGENT")
+        print("  Developed by Taimwe.Romita")
         print("  No restrictions. Full access.")
         print("=" * 60)
         print()
@@ -654,6 +655,9 @@ HTML = """<!DOCTYPE html>
     <div class="header">
         <h1>UNLIMITED AI CODING AGENT <span class="badge badge-info">INTELLIGENT</span></h1>
         <div class="status" id="status">Connecting...</div>
+    </div>
+    <div style="text-align: center; padding: 6px; font-size: 11px; color: #666; background: #0d0d0d;">
+        Developed by <span style="color: #00ff88; font-weight: 600;">Taimwe.Romita</span>
     </div>
     <div class="main">
         <div class="sidebar">
