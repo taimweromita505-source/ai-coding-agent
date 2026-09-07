@@ -58,7 +58,7 @@ class APIKeyManager:
     
     def list_keys(self) -> Dict[str, str]:
         result = {}
-        for provider in ["openai", "anthropic", "google", "ollama"]:
+        for provider in ["openai", "anthropic", "google", "ollama", "openrouter", "omniroute"]:
             key = self.get_key(provider)
             if key:
                 masked = key[:8] + "..." + key[-4:] if len(key) > 12 else "***"

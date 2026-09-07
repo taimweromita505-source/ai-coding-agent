@@ -24,6 +24,14 @@
       "google": {
         "url": "https://generativelanguage.googleapis.com/v1beta",
         "api_key": null
+      },
+      "openrouter": {
+        "url": "https://openrouter.ai/api/v1",
+        "api_key": null
+      },
+      "omniroute": {
+        "url": "http://localhost:20128/v1",
+        "api_key": null
       }
     },
     "workspace": "./workspace",
