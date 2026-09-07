@@ -462,11 +462,39 @@ Task: {user_input}"""
             step_prompt = f"{system}\n\nComplete this step precisely and concisely:\n{step}\n\nIf shell commands or file writes are needed, return them in code blocks or as command: <cmd>."
             try:
                 step_result = self._generate_with_fallback(step_prompt)
+                executed = self._try_execute_step(step_result)
+                if executed:
+                    results.append(f"Executed: {executed}")
+                else:
+                    results.append(f"Result: {step_result[:800]}")
             except Exception as e:
-                step_result = f"Error: {e}"
-            results.append(f"Result: {step_result[:800]}")
+                results.append(f"Error: {e}")
         
         return "\n\n".join(results)
+    
+    def _try_execute_step(self, step_result: str) -> Optional[str]:
+        cmd_match = re.search(r'command:\s*(.+)', step_result, re.IGNORECASE)
+        if cmd_match:
+            cmd = cmd_match.group(1).strip()
+            result = self.execute_command(cmd)
+            return f"cmd: {cmd}\n{result.get('output', '')}"
+        
+        code_match = re.search(r'```(\w+)?\n(.*?)```', step_result, re.DOTALL)
+        if code_match:
+            lang = code_match.group(1) or "python"
+            code = code_match.group(2)
+            result = self.execute_code(code, lang)
+            return f"code: {lang}\n{result.get('output', '')}"
+        
+        save_match = re.search(r'save file:\s*(\S+)', step_result, re.IGNORECASE)
+        if save_match:
+            name = save_match.group(1)
+            code_match = re.search(r'```\w*\n(.*?)```', step_result, re.DOTALL)
+            if code_match:
+                path = self.save_file(name, code_match.group(1))
+                return f"saved: {path}"
+        
+        return None
     
     def generate(self, prompt):
         return self._generate_with_fallback(prompt)
@@ -991,6 +1019,66 @@ class WebHandler(BaseHTTPRequestHandler):
                     self.send_json({"result": result})
                 except Exception as e:
                     self.send_error(500, f"Download error: {str(e)}")
+            elif self.path == '/api/file/create':
+                if not self.agent:
+                    self.send_error(500, "Agent not initialized")
+                    return
+                try:
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    if content_length == 0:
+                        self.send_error(400, "Empty request")
+                        return
+                    data = json.loads(self.rfile.read(content_length))
+                    name = data.get('name', '')
+                    content = data.get('content', '')
+                    if not name:
+                        self.send_error(400, "Missing file name")
+                        return
+                    path = self.agent.save_file(name, content)
+                    self.send_json({"path": str(path), "name": name})
+                except Exception as e:
+                    self.send_error(500, f"Create error: {str(e)}")
+            elif self.path == '/api/file/delete':
+                if not self.agent:
+                    self.send_error(500, "Agent not initialized")
+                    return
+                try:
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    if content_length == 0:
+                        self.send_error(400, "Empty request")
+                        return
+                    data = json.loads(self.rfile.read(content_length))
+                    name = data.get('name', '')
+                    if not name:
+                        self.send_error(400, "Missing file name")
+                        return
+                    filepath = self.agent.workspace / name
+                    if filepath.exists():
+                        filepath.unlink()
+                        self.send_json({"deleted": name})
+                    else:
+                        self.send_error(404, "File not found")
+                except Exception as e:
+                    self.send_error(500, f"Delete error: {str(e)}")
+            elif self.path == '/api/search':
+                if not self.agent:
+                    self.send_error(500, "Agent not initialized")
+                    return
+                try:
+                    query = {}
+                    if '?' in self.path:
+                        query = dict(qc.split('=') for qc in self.path.split('?')[1].split('&'))
+                    q = query.get('q', '')
+                    if not q:
+                        self.send_error(400, "Missing query")
+                        return
+                    results = []
+                    for f in self.agent.workspace.rglob('*'):
+                        if f.is_file() and q.lower() in f.name.lower():
+                            results.append({"name": str(f.relative_to(self.agent.workspace)), "type": "file"})
+                    self.send_json({"results": results[:50]})
+                except Exception as e:
+                    self.send_error(500, f"Search error: {str(e)}")
             elif self.path == '/favicon.ico':
                 self.send_response(204)
                 self.end_headers()
@@ -1453,6 +1541,10 @@ HTML = """<!DOCTYPE html>
     <div class="main">
         <div class="explorer">
             <div class="explorer-header">Explorer</div>
+            <div style="padding:6px; border-bottom:1px solid #222; display:flex; gap:4px;">
+                <input id="search-input" placeholder="Search files..." oninput="searchFiles()" style="flex:1; background:#0a0a0a; border:1px solid #333; color:#fff; padding:4px; border-radius:4px; font-size:12px; outline:none;">
+                <button onclick="createNewFile()" style="background:#00aa55; border:1px solid #00aa55; color:#fff; padding:4px 8px; border-radius:4px; cursor:pointer; font-size:11px;">New</button>
+            </div>
             <div class="file-tree" id="file-tree">Loading...</div>
         </div>
         <div class="editor-area">
@@ -1460,12 +1552,21 @@ HTML = """<!DOCTYPE html>
                 <div class="tab active">Welcome</div>
             </div>
             <textarea class="editor" id="editor" spellcheck="false" placeholder="Open a file from the explorer or start typing..."></textarea>
+            <div style="display:flex; gap:6px; padding:4px 8px; background:#111; border-bottom:1px solid #222; align-items:center;">
+                <button onclick="runCurrentFile()" style="background:#00aa55; border:1px solid #00aa55; color:#fff; padding:4px 10px; border-radius:4px; cursor:pointer; font-size:11px;">Run</button>
+                <span style="font-size:11px; color:#666;">Ctrl+S: Save | Ctrl+Enter: Run | Ctrl+Shift+P: Command Palette</span>
+            </div>
             <div class="bottom-panel">
                 <div class="panel-header">
                     <span>Terminal / Output</span>
                     <button onclick="clearTerminal()" style="background:#222; border:1px solid #444; color:#fff; padding:2px 8px; border-radius:4px; cursor:pointer; font-size:11px;">Clear</button>
                 </div>
                 <div class="terminal" id="terminal">Ready. Use command palette (Ctrl+Shift+P) or run commands.</div>
+                <div style="display:flex; gap:4px; padding:6px; border-top:1px solid #222;">
+                    <span style="color:#00ff88; font-size:12px; padding:4px;">$</span>
+                    <input id="terminal-input" placeholder="Run command..." onkeydown="if(event.key==='Enter') runTerminalCommand()" style="flex:1; background:#0a0a0a; border:1px solid #333; color:#fff; padding:4px; border-radius:4px; outline:none; font-size:12px;">
+                    <button onclick="runTerminalCommand()" style="background:#00aa55; border:1px solid #00aa55; color:#fff; padding:4px 10px; border-radius:4px; cursor:pointer; font-size:11px;">Run</button>
+                </div>
             </div>
         </div>
         <div class="agent-panel">
@@ -1507,6 +1608,7 @@ HTML = """<!DOCTYPE html>
             {name: 'Run: shell command', action: 'command: dir'},
             {name: 'Files: list files', action: 'list files'},
             {name: 'Files: save file', action: 'save file: app.py ```python```'},
+            {name: 'Files: search', action: 'search: test'},
             {name: 'Memory: show memory', action: 'memory'},
             {name: 'Memory: suggestions', action: 'suggest'},
             {name: 'Model: switch model', action: 'switch model: deepseek-coder:1.3b'},
@@ -1596,10 +1698,94 @@ HTML = """<!DOCTYPE html>
                     <div class="file-item" onclick="openFile('${f.name}')">
                         <span>${f.type === 'directory' ? '📁' : '📄'}</span>
                         <span>${f.name}</span>
+                        <span onclick="deleteFile('${f.name}', event)" style="margin-left:auto; color:#ff4444; cursor:pointer; font-size:11px;">×</span>
                     </div>
                 `).join('');
             } catch (e) {
                 document.getElementById('file-tree').innerHTML = '<div class="memory-item">Failed to load files</div>';
+            }
+        }
+        
+        async function searchFiles() {
+            const q = document.getElementById('search-input').value.trim();
+            if (!q) {
+                loadFileTree();
+                return;
+            }
+            try {
+                const r = await fetch('/api/search?q=' + encodeURIComponent(q));
+                const d = await r.json();
+                const container = document.getElementById('file-tree');
+                if (!d.results || !d.results.length) {
+                    container.innerHTML = '<div class="memory-item">No matches</div>';
+                    return;
+                }
+                container.innerHTML = d.results.map(f => `
+                    <div class="file-item" onclick="openFile('${f.name}')">
+                        <span>📄</span>
+                        <span>${f.name}</span>
+                    </div>
+                `).join('');
+            } catch (e) {
+                document.getElementById('file-tree').innerHTML = '<div class="memory-item">Search failed</div>';
+            }
+        }
+        
+        async function createNewFile() {
+            const name = prompt('File name:');
+            if (!name) return;
+            try {
+                const r = await fetch('/api/file/create', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name, content: ''})
+                });
+                const d = await r.json();
+                appendTerminal('Created: ' + d.name);
+                openFile(d.name);
+                loadFileTree();
+            } catch (e) {
+                appendTerminal('Create error: ' + e.message);
+            }
+        }
+        
+        async function deleteFile(name, event) {
+            event.stopPropagation();
+            if (!confirm('Delete ' + name + '?')) return;
+            try {
+                const r = await fetch('/api/file/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name})
+                });
+                const d = await r.json();
+                appendTerminal('Deleted: ' + d.deleted);
+                if (currentFile === name) {
+                    document.getElementById('editor').value = '';
+                    currentFile = null;
+                }
+                loadFileTree();
+            } catch (e) {
+                appendTerminal('Delete error: ' + e.message);
+            }
+        }
+        
+        async function runCurrentFile() {
+            if (!currentFile || currentFile === 'Welcome') {
+                appendTerminal('No file open');
+                return;
+            }
+            const content = document.getElementById('editor').value;
+            try {
+                const r = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({message: `execute ${currentFile}\n${content}`})
+                });
+                const d = await r.json();
+                appendTerminal(d.response || 'Executed');
+            } catch (e) {
+                appendTerminal('Run error: ' + e.message);
             }
         }
         
@@ -1611,6 +1797,25 @@ HTML = """<!DOCTYPE html>
         
         function clearTerminal() {
             document.getElementById('terminal').textContent = 'Terminal cleared.';
+        }
+        
+        async function runTerminalCommand() {
+            const input = document.getElementById('terminal-input');
+            const cmd = input.value.trim();
+            if (!cmd) return;
+            input.value = '';
+            appendTerminal('$ ' + cmd);
+            try {
+                const r = await fetch('/api/command', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({cmd})
+                });
+                const d = await r.json();
+                appendTerminal(d.output || 'Command executed');
+            } catch (e) {
+                appendTerminal('Command error: ' + e.message);
+            }
         }
         
         async function sendAgent() {
@@ -1799,6 +2004,10 @@ HTML = """<!DOCTYPE html>
             if ((e.ctrlKey || e.metaKey) && e.key === 's') {
                 e.preventDefault();
                 saveCurrentFile();
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                runCurrentFile();
             }
         });
         
