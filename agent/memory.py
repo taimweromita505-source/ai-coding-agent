@@ -50,6 +50,9 @@ class MemoryStore:
             "common_commands": [],
             "common_files": []
         })
+        self._dirty = False
+        self._flush_counter = 0
+        self._flush_interval = 3
     
     def _load_json(self, path: Path, default):
         try:
@@ -60,6 +63,26 @@ class MemoryStore:
         return default
     
     def _save_json(self, path: Path, data):
+        self._dirty = True
+    
+    def flush(self):
+        if not self._dirty:
+            return
+        try:
+            self._write_json(self.history_file, self.history)
+            self._write_json(self.learned_file, self.learned)
+            self._write_json(self.profile_file, self.profile)
+            self._dirty = False
+            self._flush_counter = 0
+        except Exception as e:
+            sys.stderr.write(f"Warning: Failed to flush memory: {e}\n")
+    def maybe_flush(self):
+        self._flush_counter += 1
+        if self._flush_counter >= self._flush_interval:
+            self._flush_counter = 0
+            self.flush()
+    
+    def _write_json(self, path: Path, data):
         try:
             path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
         except Exception as e:
