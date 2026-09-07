@@ -779,7 +779,6 @@ class WebHandler(BaseHTTPRequestHandler):
     
     def do_GET(self):
         try:
-        try:
             if self.path == '/':
                 self.send_html()
             elif self.path == '/api/status':
