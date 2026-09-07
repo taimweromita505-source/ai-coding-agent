@@ -1441,7 +1441,7 @@ HTML = """<!DOCTYPE html>
 <body>
     <div class="status-bar">
         <div class="left">
-            <div><strong>AI Agent IDE</strong></div>
+            <div><strong>AI Agent IDE</strong> <span style="font-size:11px; color:#888;">Developed by Taimwe.Romita</span></div>
             <div class="status" id="status">Connecting...</div>
         </div>
         <div class="right">
