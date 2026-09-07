@@ -1,5 +1,7 @@
-vscode-extension/**
+.vscode/**
 .gitignore
 *.log
 node_modules
 out/test/**
+src/**
+tsconfig.json

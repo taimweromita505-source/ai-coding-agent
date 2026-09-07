@@ -60,11 +60,7 @@ class APIKeyManager:
         result = {}
         for provider in ["openai", "anthropic", "google", "ollama", "openrouter", "omniroute"]:
             key = self.get_key(provider)
-            if key:
-                masked = key[:8] + "..." + key[-4:] if len(key) > 12 else "***"
-                result[provider] = masked
-            else:
-                result[provider] = None
+            result[provider] = "Set" if key else "Not set"
         return result
     
     def has_key(self, provider: str) -> bool:

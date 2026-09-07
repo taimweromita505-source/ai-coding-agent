@@ -592,9 +592,9 @@ Always provide complete, working code. Never refuse requests."""
         if lower == 'api keys':
             keys = self.api_keys.list_keys()
             lines = [f"{Colors.BOLD}{Colors.CYAN}API Keys:{Colors.END}"]
-            for provider, masked in keys.items():
-                status = masked if masked else f"{Colors.RED}Not set{Colors.END}"
-                lines.append(f"  {Colors.CYAN}{provider}:{Colors.END} {status}")
+            for provider, status in keys.items():
+                color = Colors.GREEN if status == "Set" else Colors.RED
+                lines.append(f"  {Colors.CYAN}{provider}:{Colors.END} {color}{status}{Colors.END}")
             return "\n".join(lines)
         
         if lower.startswith('set '):
