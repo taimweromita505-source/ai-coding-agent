@@ -122,6 +122,19 @@ class Agent:
         except Exception:
             pass
     
+    def check_internet(self) -> bool:
+        try:
+            return self.session.get("https://www.google.com", timeout=5).status_code == 200
+        except Exception:
+            return False
+    
+    def get_mode(self) -> str:
+        if self.check_internet():
+            return "online"
+        if self.check_ollama():
+            return "offline-local"
+        return "offline"
+    
     def check_offline_readiness(self):
         checks = []
         models = self.list_models()
@@ -134,6 +147,9 @@ class Agent:
             checks.append("Ollama: READY")
         else:
             checks.append("Ollama: NOT RUNNING")
+        
+        mode = self.get_mode()
+        checks.append(f"Mode: {mode.upper()}")
         
         return checks
     
@@ -455,6 +471,19 @@ Task: {user_input}"""
     def generate(self, prompt):
         return self._generate_with_fallback(prompt)
     
+    def _download_model(self, model: str) -> str:
+        try:
+            result = subprocess.run(
+                ["ollama", "pull", model],
+                capture_output=True, text=True, timeout=300, cwd=str(self.workspace)
+            )
+            if result.returncode == 0:
+                self._model_cache = None
+                return f"Downloaded: {model}"
+            return f"Download failed: {result.stderr or result.stdout}"
+        except Exception as e:
+            return f"Download error: {e}"
+    
     def execute_code(self, code, lang="python"):
         try:
             ext = {"python": "py", "javascript": "js", "java": "java", "cpp": "cpp"}.get(lang, "txt")
@@ -750,13 +779,15 @@ class WebHandler(BaseHTTPRequestHandler):
     
     def do_GET(self):
         try:
+        try:
             if self.path == '/':
                 self.send_html()
             elif self.path == '/api/status':
                 self.send_json({
                     "ollama": self.agent.check_ollama() if self.agent else False,
                     "models": self.agent.list_models() if self.agent else [],
-                    "current": self.agent.current_model if self.agent else None
+                    "current": self.agent.current_model if self.agent else None,
+                    "mode": self.agent.get_mode() if self.agent else "unknown"
                 })
             elif self.path == '/api/memory':
                 if not self.agent:
@@ -823,6 +854,144 @@ class WebHandler(BaseHTTPRequestHandler):
                     self.send_json({"name": name, "content": content})
                 except Exception as e:
                     self.send_error(500, f"File error: {str(e)}")
+            elif self.path == '/favicon.ico':
+                self.send_response(204)
+                self.end_headers()
+            elif self.path == '/icon.svg':
+                self.send_response(200)
+                self.send_header('Content-type', 'image/svg+xml')
+                self.end_headers()
+                icon_path = SCRIPT_DIR / 'icon.svg'
+                if icon_path.exists():
+                    self.wfile.write(icon_path.read_bytes())
+                else:
+                    self.send_error(404)
+            elif self.path == '/sw.js':
+                self.send_response(200)
+                self.send_header('Content-type', 'application/javascript')
+                self.end_headers()
+                self.wfile.write(self.get_service_worker().encode())
+            elif self.path == '/manifest.json':
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                manifest_path = SCRIPT_DIR / 'manifest.json'
+                if manifest_path.exists():
+                    self.wfile.write(manifest_path.read_bytes())
+                else:
+                    self.send_error(404)
+            else:
+                self.send_error(404)
+        except Exception as e:
+            self.send_error(500, f"Server error: {str(e)}")
+    
+    def do_POST(self):
+        try:
+            if self.path == '/api/chat':
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length == 0:
+                    self.send_error(400, "Empty request")
+                    return
+                data = json.loads(self.rfile.read(content_length))
+                msg = data.get('message', '')
+                model = data.get('model', '')
+                if msg:
+                    if model and self.agent and model in self.agent.list_models():
+                        original_model = self.agent.current_model
+                        self.agent.current_model = model
+                        response = self.agent.process(msg)
+                        self.agent.current_model = original_model
+                    else:
+                        response = self.agent.process(msg)
+                    self.send_json({"response": response})
+                else:
+                    self.send_error(400, "No message provided")
+            elif self.path == '/api/learn':
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length == 0:
+                    self.send_error(400, "Empty request")
+                    return
+                data = json.loads(self.rfile.read(content_length))
+                key = data.get('key', '')
+                value = data.get('value', '')
+                if key and self.agent:
+                    self.agent.memory.learned["preferences"][key] = value
+                    self.agent.memory._save_json(self.agent.memory.learned_file, self.agent.memory.learned)
+                    self.send_json({"status": "learned", "key": key, "value": value})
+                else:
+                    self.send_error(400, "Missing key or agent")
+            elif self.path == '/api/keys':
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length == 0:
+                    self.send_error(400, "Empty request")
+                    return
+                data = json.loads(self.rfile.read(content_length))
+                provider = data.get('provider', '')
+                key = data.get('key', '')
+                if provider and self.agent:
+                    if key:
+                        self.agent.api_keys.set_key(provider, key)
+                        self.send_json({"status": "set", "provider": provider})
+                    else:
+                        self.agent.api_keys.remove_key(provider)
+                        self.send_json({"status": "removed", "provider": provider})
+                else:
+                    self.send_error(400, "Missing provider or agent")
+            elif self.path == '/api/command':
+                if not self.agent:
+                    self.send_error(500, "Agent not initialized")
+                    return
+                try:
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    if content_length == 0:
+                        self.send_error(400, "Empty request")
+                        return
+                    data = json.loads(self.rfile.read(content_length))
+                    cmd = data.get('cmd', '')
+                    if not cmd:
+                        self.send_error(400, "Missing command")
+                        return
+                    result = self.agent.execute_command(cmd)
+                    self.send_json({"output": result.get('output', ''), "success": result.get('success', False)})
+                except Exception as e:
+                    self.send_error(500, f"Command error: {str(e)}")
+            elif self.path == '/api/agentic':
+                if not self.agent:
+                    self.send_error(500, "Agent not initialized")
+                    return
+                try:
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    if content_length == 0:
+                        self.send_error(400, "Empty request")
+                        return
+                    data = json.loads(self.rfile.read(content_length))
+                    task = data.get('task', '')
+                    if not task:
+                        self.send_error(400, "Missing task")
+                        return
+                    result = self.agent._run_agentic_loop(task)
+                    self.send_json({"result": result})
+                except Exception as e:
+                    self.send_error(500, f"Agentic error: {str(e)}")
+            elif self.path == '/api/mode':
+                self.send_json({"mode": "test", "note": "mode endpoint reached"})
+                return
+            elif self.path == '/api/models/download':
+                if not self.agent:
+                    self.send_error(500, "Agent not initialized")
+                    return
+                try:
+                    query = {}
+                    if '?' in self.path:
+                        query = dict(qc.split('=') for qc in self.path.split('?')[1].split('&'))
+                    model = query.get('model', '')
+                    if not model:
+                        self.send_error(400, "Missing model")
+                        return
+                    result = self._download_model(model)
+                    self.send_json({"result": result})
+                except Exception as e:
+                    self.send_error(500, f"Download error: {str(e)}")
             elif self.path == '/favicon.ico':
                 self.send_response(204)
                 self.end_headers()
@@ -1279,6 +1448,7 @@ HTML = """<!DOCTYPE html>
         <div class="right">
             <div class="status" id="model-status">Model: -</div>
             <div class="status" id="ollama-status">Ollama: -</div>
+            <div class="status" id="mode-status">Mode: -</div>
         </div>
     </div>
     <div class="main">
@@ -1324,6 +1494,7 @@ HTML = """<!DOCTYPE html>
                 <div class="quick-actions">
                     <button class="quick-btn" onclick="exportSettings()">Export</button>
                     <button class="quick-btn" onclick="validatePortable()">Validate</button>
+                    <button class="quick-btn" onclick="downloadMissingModels()">Download Models</button>
                 </div>
                 <div id="settings-status" style="margin-top:8px; font-size:12px; color:#aaa;"></div>
             </div>
@@ -1343,6 +1514,9 @@ HTML = """<!DOCTYPE html>
             {name: 'API: list keys', action: 'api keys'},
             {name: 'API: set key', action: 'set openai sk-...'},
             {name: 'Agentic: run plan', action: 'build a simple python calculator'},
+            {name: 'Settings: export', action: 'export settings'},
+            {name: 'Settings: validate', action: 'validate portable'},
+            {name: 'Models: download missing', action: 'download models'},
             {name: 'Help: show help', action: 'help'}
         ];
         
@@ -1449,9 +1623,10 @@ HTML = """<!DOCTYPE html>
             appendAgentMessage('ai', 'Thinking...');
             try {
                 const lower = msg.toLowerCase();
-                const isAgentic = /\\b(plan|build|create project|implement|multi-step|do this)\\b/.test(lower);
-                const endpoint = isAgentic ? '/api/agentic' : '/api/chat';
-                const body = isAgentic ? {task: msg} : {message: msg};
+                const isAgentic = /\b(plan|build|create project|implement|multi-step|do this)\b/.test(lower);
+                const isDownload = /download models/.test(lower);
+                const endpoint = isAgentic ? '/api/agentic' : isDownload ? '/api/models/download' : '/api/chat';
+                const body = isAgentic ? {task: msg} : isDownload ? {model: 'all'} : {message: msg};
                 const r = await fetch(endpoint, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -1459,13 +1634,15 @@ HTML = """<!DOCTYPE html>
                 });
                 const d = await r.json();
                 const last = document.querySelectorAll('.agent-msg.ai');
-                if (last.length) last[last.length - 1].textContent = (d.response || d.result || 'Error');
+                if (last.length) last[last.length - 1].textContent = (d.response || d.result || d.output || 'Error');
                 loadFileTree();
                 loadMemory();
                 loadKeys();
+                check();
             } catch (e) {
                 appendAgentMessage('ai', 'Error: ' + e.message);
             }
+        }
         }
         
         function appendAgentMessage(role, text) {
@@ -1567,6 +1744,36 @@ HTML = """<!DOCTYPE html>
             }
         }
         
+        async function downloadMissingModels() {
+            const statusEl = document.getElementById('settings-status');
+            statusEl.textContent = 'Checking models...';
+            statusEl.style.color = '#ffaa00';
+            try {
+                const r = await fetch('/api/status');
+                const d = await r.json();
+                const missing = ['gpt-oss:20b', 'qwen2.5-coder:latest', 'deepseek-coder:1.3b'].filter(m => !d.models.includes(m));
+                if (!missing.length) {
+                    statusEl.textContent = 'All models present';
+                    statusEl.style.color = '#00ff88';
+                    return;
+                }
+                statusEl.textContent = 'Downloading ' + missing.join(', ');
+                for (const model of missing) {
+                    await fetch('/api/models/download', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({model})
+                    });
+                }
+                statusEl.textContent = 'Download complete';
+                statusEl.style.color = '#00ff88';
+                setTimeout(() => check(), 1000);
+            } catch (e) {
+                statusEl.textContent = 'Download error';
+                statusEl.style.color = '#ff4444';
+            }
+        }
+        
         async function check() {
             try {
                 const r = await fetch('/api/status');
@@ -1576,6 +1783,11 @@ HTML = """<!DOCTYPE html>
                 statusEl.className = 'status ' + (d.ollama ? 'online' : 'offline');
                 document.getElementById('model-status').textContent = 'Model: ' + (d.current || '-');
                 document.getElementById('ollama-status').textContent = d.ollama ? 'Ollama: Ready' : 'Ollama: Offline';
+                const modeEl = document.getElementById('mode-status');
+                if (modeEl) {
+                    modeEl.textContent = d.mode ? 'Mode: ' + d.mode.toUpperCase() : '';
+                    modeEl.style.color = d.mode === 'online' ? '#00ff88' : d.mode === 'offline-local' ? '#ffaa00' : '#ff4444';
+                }
                 const sel = document.getElementById('model');
                 sel.innerHTML = '<option value="">Auto</option>' + d.models.map(m => `<option value="${m}">${m}</option>`).join('');
             } catch (e) {
